@@ -1,0 +1,30 @@
+name: Post Reddit Memes
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  post-meme:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Fetch and Post Meme
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          REDDIT_DATA=$(curl -s -A "MemeBot/1.0" "https://www.reddit.com/r/memes/hot.json?limit=5")
+          
+          MEME=$(echo "$REDDIT_DATA" | jq -r '.data.children[0].data')
+          
+          TITLE=$(echo "$MEME" | jq -r '.title' | sed 's/"/\\"/g')
+          IMAGE_URL=$(echo "$MEME" | jq -r '.url')
+          POST_URL=$(echo "$MEME" | jq -r '"https://reddit.com" + .permalink')
+          
+          if [[ $IMAGE_URL =~ \.(jpg|jpeg|png|gif)$ ]]; then
+            curl -H "Content-Type: application/json" \
+                 -X POST \
+                 -d "{\"embeds\":[{\"title\":\"$TITLE\",\"url\":\"$POST_URL\",\"image\":{\"url\":\"$IMAGE_URL\"},\"color\":16761035,\"footer\":{\"text\":\"From r/memes\"}}]}" \
+                 "$DISCORD_WEBHOOK"
+          fi
