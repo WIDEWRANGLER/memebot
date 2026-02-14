@@ -14,10 +14,10 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
+          echo "Fetching from Reddit..."
           REDDIT_DATA=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "https://www.reddit.com/r/memes/top.json?t=day&limit=10")
           
-          echo "$REDDIT_DATA" > /tmp/reddit.json
-          
+          echo "Parsing meme data..."
           MEME=$(echo "$REDDIT_DATA" | jq -r '.data.children[] | select(.data.post_hint == "image" or (.data.url | test("\\.(jpg|jpeg|png|gif)$"))) | .data' | head -1)
           
           if [ -z "$MEME" ]; then
@@ -29,7 +29,22 @@ jobs:
           IMAGE_URL=$(echo "$MEME" | jq -r '.url')
           POST_URL=$(echo "$MEME" | jq -r '"https://reddit.com" + .permalink')
           
-          curl -H "Content-Type: application/json" \
+          echo "Title: $TITLE"
+          echo "Image URL: $IMAGE_URL"
+          echo "Webhook URL set: ${DISCORD_WEBHOOK:0:30}..."
+          
+          echo "Posting to Discord..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -H "Content-Type: application/json" \
                -X POST \
                -d "{\"embeds\":[{\"title\":\"${TITLE}\",\"url\":\"${POST_URL}\",\"image\":{\"url\":\"${IMAGE_URL}\"},\"color\":16761035,\"footer\":{\"text\":\"From r/memes\"}}]}" \
-               "$DISCORD_WEBHOOK"
+               "$DISCORD_WEBHOOK")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          echo "Discord Response Code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" != "204" ] && [ "$HTTP_CODE" != "200" ]; then
+            echo "Error posting to Discord!"
+            echo "$RESPONSE"
+          else
+            echo "Successfully posted meme!"
+          fi
