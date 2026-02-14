@@ -14,17 +14,22 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          REDDIT_DATA=$(curl -s -A "MemeBot/1.0" "https://www.reddit.com/r/memes/hot.json?limit=5")
+          REDDIT_DATA=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "https://www.reddit.com/r/memes/top.json?t=day&limit=10")
           
-          MEME=$(echo "$REDDIT_DATA" | jq -r '.data.children[0].data')
+          echo "$REDDIT_DATA" > /tmp/reddit.json
           
-          TITLE=$(echo "$MEME" | jq -r '.title' | sed 's/"/\\"/g')
+          MEME=$(echo "$REDDIT_DATA" | jq -r '.data.children[] | select(.data.post_hint == "image" or (.data.url | test("\\.(jpg|jpeg|png|gif)$"))) | .data' | head -1)
+          
+          if [ -z "$MEME" ]; then
+            echo "No image found"
+            exit 0
+          fi
+          
+          TITLE=$(echo "$MEME" | jq -r '.title' | sed 's/"/\\"/g' | sed "s/'/\\'/g")
           IMAGE_URL=$(echo "$MEME" | jq -r '.url')
           POST_URL=$(echo "$MEME" | jq -r '"https://reddit.com" + .permalink')
           
-          if [[ $IMAGE_URL =~ \.(jpg|jpeg|png|gif)$ ]]; then
-            curl -H "Content-Type: application/json" \
-                 -X POST \
-                 -d "{\"embeds\":[{\"title\":\"$TITLE\",\"url\":\"$POST_URL\",\"image\":{\"url\":\"$IMAGE_URL\"},\"color\":16761035,\"footer\":{\"text\":\"From r/memes\"}}]}" \
-                 "$DISCORD_WEBHOOK"
-          fi
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "{\"embeds\":[{\"title\":\"${TITLE}\",\"url\":\"${POST_URL}\",\"image\":{\"url\":\"${IMAGE_URL}\"},\"color\":16761035,\"footer\":{\"text\":\"From r/memes\"}}]}" \
+               "$DISCORD_WEBHOOK"
