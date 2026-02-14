@@ -14,37 +14,70 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          echo "Fetching from Reddit..."
-          REDDIT_DATA=$(curl -s -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "https://www.reddit.com/r/memes/top.json?t=day&limit=10")
+          python3 << 'EOF'
+          import requests
+          import json
+          import os
+          import random
           
-          echo "Parsing meme data..."
-          MEME=$(echo "$REDDIT_DATA" | jq -r '.data.children[] | select(.data.post_hint == "image" or (.data.url | test("\\.(jpg|jpeg|png|gif)$"))) | .data' | head -1)
+          DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK')
           
-          if [ -z "$MEME" ]; then
-            echo "No image found"
-            exit 0
-          fi
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
           
-          TITLE=$(echo "$MEME" | jq -r '.title' | sed 's/"/\\"/g' | sed "s/'/\\'/g")
-          IMAGE_URL=$(echo "$MEME" | jq -r '.url')
-          POST_URL=$(echo "$MEME" | jq -r '"https://reddit.com" + .permalink')
+          print("Fetching memes from Reddit...")
+          response = requests.get(
+              'https://www.reddit.com/r/memes/hot.json?limit=20',
+              headers=headers
+          )
           
-          echo "Title: $TITLE"
-          echo "Image URL: $IMAGE_URL"
-          echo "Webhook URL set: ${DISCORD_WEBHOOK:0:30}..."
+          if response.status_code != 200:
+              print(f"Reddit returned status code: {response.status_code}")
+              exit(0)
           
-          echo "Posting to Discord..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -H "Content-Type: application/json" \
-               -X POST \
-               -d "{\"embeds\":[{\"title\":\"${TITLE}\",\"url\":\"${POST_URL}\",\"image\":{\"url\":\"${IMAGE_URL}\"},\"color\":16761035,\"footer\":{\"text\":\"From r/memes\"}}]}" \
-               "$DISCORD_WEBHOOK")
+          data = response.json()
+          posts = data['data']['children']
           
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          echo "Discord Response Code: $HTTP_CODE"
+          # Filter for image posts only
+          image_posts = []
+          for post in posts:
+              url = post['data']['url']
+              if url.endswith(('.jpg', '.jpeg', '.png', '.gif')) or 'i.redd.it' in url:
+                  image_posts.append(post['data'])
           
-          if [ "$HTTP_CODE" != "204" ] && [ "$HTTP_CODE" != "200" ]; then
-            echo "Error posting to Discord!"
-            echo "$RESPONSE"
-          else
-            echo "Successfully posted meme!"
-          fi
+          if not image_posts:
+              print("No image posts found")
+              exit(0)
+          
+          # Pick a random meme
+          meme = random.choice(image_posts)
+          
+          title = meme['title']
+          image_url = meme['url']
+          post_url = f"https://reddit.com{meme['permalink']}"
+          
+          print(f"Title: {title}")
+          print(f"Image: {image_url}")
+          
+          # Post to Discord
+          payload = {
+              "embeds": [{
+                  "title": title[:256],  # Discord limit
+                  "url": post_url,
+                  "image": {"url": image_url},
+                  "color": 16761035,
+                  "footer": {"text": "From r/memes"}
+              }]
+          }
+          
+          print("Posting to Discord...")
+          discord_response = requests.post(DISCORD_WEBHOOK, json=payload)
+          
+          print(f"Discord status code: {discord_response.status_code}")
+          if discord_response.status_code in [200, 204]:
+              print("✓ Successfully posted meme!")
+          else:
+              print(f"✗ Error: {discord_response.text}")
+          
+          EOF
