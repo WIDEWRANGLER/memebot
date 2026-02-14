@@ -19,65 +19,43 @@ jobs:
           import json
           import os
           import random
+          import time
           
           DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK')
           
-          headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-          }
+          print("Fetching memes from Reddit RSS...")
           
-          print("Fetching memes from Reddit...")
+          # Use Reddit RSS feed (harder to block)
           response = requests.get(
-              'https://www.reddit.com/r/memes/hot.json?limit=20',
-              headers=headers
+              'https://www.reddit.com/r/memes/.rss',
+              headers={'User-Agent': 'PostmanRuntime/7.32.0'}
           )
           
           if response.status_code != 200:
-              print(f"Reddit returned status code: {response.status_code}")
+              print(f"Failed to fetch: {response.status_code}")
               exit(0)
           
-          data = response.json()
-          posts = data['data']['children']
+          # Parse RSS XML
+          import xml.etree.ElementTree as ET
+          root = ET.fromstring(response.content)
           
-          # Filter for image posts only
-          image_posts = []
-          for post in posts:
-              url = post['data']['url']
-              if url.endswith(('.jpg', '.jpeg', '.png', '.gif')) or 'i.redd.it' in url:
-                  image_posts.append(post['data'])
-          
-          if not image_posts:
-              print("No image posts found")
-              exit(0)
-          
-          # Pick a random meme
-          meme = random.choice(image_posts)
-          
-          title = meme['title']
-          image_url = meme['url']
-          post_url = f"https://reddit.com{meme['permalink']}"
-          
-          print(f"Title: {title}")
-          print(f"Image: {image_url}")
-          
-          # Post to Discord
-          payload = {
-              "embeds": [{
-                  "title": title[:256],  # Discord limit
-                  "url": post_url,
-                  "image": {"url": image_url},
-                  "color": 16761035,
-                  "footer": {"text": "From r/memes"}
-              }]
-          }
-          
-          print("Posting to Discord...")
-          discord_response = requests.post(DISCORD_WEBHOOK, json=payload)
-          
-          print(f"Discord status code: {discord_response.status_code}")
-          if discord_response.status_code in [200, 204]:
-              print("✓ Successfully posted meme!")
-          else:
-              print(f"✗ Error: {discord_response.text}")
-          
-          EOF
+          entries = []
+          for entry in root.findall('.//{http://www.w3.org/2005/Atom}entry'):
+              title_elem = entry.find('{http://www.w3.org/2005/Atom}title')
+              content_elem = entry.find('{http://www.w3.org/2005/Atom}content')
+              link_elem = entry.find('{http://www.w3.org/2005/Atom}link')
+              
+              if title_elem is not None and content_elem is not None:
+                  content = content_elem.text or ""
+                  link = link_elem.get('href') if link_elem is not None else ""
+                  
+                  # Extract image URL from content
+                  if 'i.redd.it' in content or 'i.imgur.com' in content:
+                      import re
+                      img_match = re.search(r'(https://i\.redd\.it/[^\s"<]+\.(jpg|png|gif))', content)
+                      if not img_match:
+                          img_match = re.search(r'(https://i\.imgur\.com/[^\s"<]+\.(jpg|png|gif))', content)
+                      
+                      if img_match:
+                          entries.append({
+                              'title': title_elem.text,
