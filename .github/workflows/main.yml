@@ -1,10 +1,8 @@
 name: Post Reddit Memes
-
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
-
 jobs:
   post-meme:
     runs-on: ubuntu-latest
@@ -18,12 +16,22 @@ jobs:
           import requests
           import os
           import time
+          import json
           
           DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK')
+          POSTED_MEMES_FILE = '/tmp/posted_memes.json'
           
           # List of all subreddits
-          subreddits = ['memes', 'cursedcomments', 'Dank', 'HolUp', 'darkfunny', 'rareinsults']
+          subreddits = ['memes', 'cursedcomments', 'HolUp', 'rareinsults', 'IndianDankMemes']
           
+          # Load previously posted meme IDs
+          try:
+              with open(POSTED_MEMES_FILE, 'r') as f:
+                  posted_memes = set(json.load(f))
+          except FileNotFoundError:
+              posted_memes = set()
+          
+          print(f"Loaded {len(posted_memes)} previously posted memes")
           print(f"Fetching memes from {len(subreddits)} subreddits...")
           
           posted_count = 0
@@ -32,44 +40,63 @@ jobs:
               try:
                   print(f"\n--- Fetching from r/{subreddit} ---")
                   
-                  # Fetch meme from this subreddit
-                  response = requests.get(f'https://meme-api.com/gimme/{subreddit}')
+                  # Try to fetch multiple memes to find a unique one
+                  max_attempts = 5
+                  meme_found = False
                   
-                  if response.status_code != 200:
-                      print(f"API error for r/{subreddit}: {response.status_code}")
-                      continue
+                  for attempt in range(max_attempts):
+                      response = requests.get(f'https://meme-api.com/gimme/{subreddit}')
+                      
+                      if response.status_code != 200:
+                          print(f"API error for r/{subreddit}: {response.status_code}")
+                          break
+                      
+                      data = response.json()
+                      
+                      post_id = data.get('postLink', '')
+                      
+                      # Check if we've already posted this meme
+                      if post_id in posted_memes:
+                          print(f"Attempt {attempt + 1}: Meme already posted, fetching another...")
+                          time.sleep(0.5)
+                          continue
+                      
+                      # Found a unique meme
+                      title = data.get('title', 'No title')
+                      image_url = data.get('url', '')
+                      
+                      if not image_url:
+                          print(f"No image found for r/{subreddit}")
+                          break
+                      
+                      print(f"Title: {title[:50]}...")
+                      print(f"Image: {image_url}")
+                      
+                      # Post to Discord
+                      payload = {
+                          "embeds": [{
+                              "title": title[:256],
+                              "url": post_id,
+                              "image": {"url": image_url},
+                              "color": 16761035,
+                              "footer": {"text": f"From r/{subreddit}"}
+                          }]
+                      }
+                      
+                      discord_response = requests.post(DISCORD_WEBHOOK, json=payload)
+                      
+                      if discord_response.status_code in [200, 204]:
+                          print(f"✓ Posted from r/{subreddit}")
+                          posted_memes.add(post_id)
+                          posted_count += 1
+                          meme_found = True
+                          break
+                      else:
+                          print(f"✗ Discord error for r/{subreddit}: {discord_response.status_code}")
+                          break
                   
-                  data = response.json()
-                  
-                  title = data.get('title', 'No title')
-                  image_url = data.get('url', '')
-                  post_url = data.get('postLink', '')
-                  
-                  if not image_url:
-                      print(f"No image found for r/{subreddit}")
-                      continue
-                  
-                  print(f"Title: {title[:50]}...")
-                  print(f"Image: {image_url}")
-                  
-                  # Post to Discord
-                  payload = {
-                      "embeds": [{
-                          "title": title[:256],
-                          "url": post_url,
-                          "image": {"url": image_url},
-                          "color": 16761035,
-                          "footer": {"text": f"From r/{subreddit}"}
-                      }]
-                  }
-                  
-                  discord_response = requests.post(DISCORD_WEBHOOK, json=payload)
-                  
-                  if discord_response.status_code in [200, 204]:
-                      print(f"✓ Posted from r/{subreddit}")
-                      posted_count += 1
-                  else:
-                      print(f"✗ Discord error for r/{subreddit}: {discord_response.status_code}")
+                  if not meme_found:
+                      print(f"Could not find unique meme for r/{subreddit} after {max_attempts} attempts")
                   
                   # Small delay between posts to avoid rate limiting
                   time.sleep(1)
@@ -78,6 +105,12 @@ jobs:
                   print(f"Error with r/{subreddit}: {str(e)}")
                   continue
           
+          # Save posted meme IDs (keep only last 1000 to prevent file from growing too large)
+          posted_memes_list = list(posted_memes)[-1000:]
+          with open(POSTED_MEMES_FILE, 'w') as f:
+              json.dump(posted_memes_list, f)
+          
           print(f"\n=== SUMMARY: Posted {posted_count}/{len(subreddits)} memes ===")
+          print(f"Tracking {len(posted_memes_list)} posted memes")
           
           ENDOFPYTHON
