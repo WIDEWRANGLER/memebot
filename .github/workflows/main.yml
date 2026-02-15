@@ -22,7 +22,7 @@ jobs:
           POSTED_MEMES_FILE = '/tmp/posted_memes.json'
           
           # List of all subreddits
-          subreddits = ['memes', 'cursedcomments', 'HolUp', 'rareinsults', 'IndianDankMemes']
+          subreddits = ['memes', 'cursedcomments', 'animememes', 'rareinsults', 'IndianDankMemes']
           
           # Load previously posted meme IDs
           try:
