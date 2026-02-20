@@ -1,7 +1,7 @@
 name: Post Reddit Memes
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */8 * * *'
   workflow_dispatch:
 jobs:
   post-meme:
