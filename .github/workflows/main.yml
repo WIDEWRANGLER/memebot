@@ -1,116 +1,79 @@
 name: Post Reddit Memes
+
 on:
   schedule:
     - cron: '0 */8 * * *'
   workflow_dispatch:
+
 jobs:
   post-meme:
     runs-on: ubuntu-latest
-    
+
     steps:
+      - uses: actions/checkout@v4
+
       - name: Fetch and Post Memes
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          python3 << 'ENDOFPYTHON'
+          python3 << 'EOF'
           import requests
           import os
-          import time
           import json
-          
-          DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK')
-          POSTED_MEMES_FILE = '/tmp/posted_memes.json'
-          
-          # List of all subreddits
-          subreddits = ['memes', 'cursedcomments', 'animememes', 'rareinsults', 'IndianDankMemes']
-          
-          # Load previously posted meme IDs
+          import time
+
+          DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
+          FILE = "posted_memes.json"
+          SUBREDDITS = ["memes", "cursedcomments", "animememes", "rareinsults", "IndianDankMemes"]
+
           try:
-              with open(POSTED_MEMES_FILE, 'r') as f:
-                  posted_memes = set(json.load(f))
-          except FileNotFoundError:
-              posted_memes = set()
-          
-          print(f"Loaded {len(posted_memes)} previously posted memes")
-          print(f"Fetching memes from {len(subreddits)} subreddits...")
-          
-          posted_count = 0
-          
-          for subreddit in subreddits:
+              with open(FILE, "r") as f:
+                  posted = set(json.load(f))
+          except:
+              posted = set()
+
+          for subreddit in SUBREDDITS:
               try:
-                  print(f"\n--- Fetching from r/{subreddit} ---")
-                  
-                  # Try to fetch multiple memes to find a unique one
-                  max_attempts = 5
-                  meme_found = False
-                  
-                  for attempt in range(max_attempts):
-                      response = requests.get(f'https://meme-api.com/gimme/{subreddit}')
-                      
-                      if response.status_code != 200:
-                          print(f"API error for r/{subreddit}: {response.status_code}")
-                          break
-                      
-                      data = response.json()
-                      
-                      post_id = data.get('postLink', '')
-                      
-                      # Check if we've already posted this meme
-                      if post_id in posted_memes:
-                          print(f"Attempt {attempt + 1}: Meme already posted, fetching another...")
-                          time.sleep(0.5)
-                          continue
-                      
-                      # Found a unique meme
-                      title = data.get('title', 'No title')
-                      image_url = data.get('url', '')
-                      
-                      if not image_url:
-                          print(f"No image found for r/{subreddit}")
-                          break
-                      
-                      print(f"Title: {title[:50]}...")
-                      print(f"Image: {image_url}")
-                      
-                      # Post to Discord
-                      payload = {
-                          "embeds": [{
-                              "title": title[:256],
-                              "url": post_id,
-                              "image": {"url": image_url},
-                              "color": 16761035,
-                              "footer": {"text": f"From r/{subreddit}"}
-                          }]
-                      }
-                      
-                      discord_response = requests.post(DISCORD_WEBHOOK, json=payload)
-                      
-                      if discord_response.status_code in [200, 204]:
-                          print(f"✓ Posted from r/{subreddit}")
-                          posted_memes.add(post_id)
-                          posted_count += 1
-                          meme_found = True
-                          break
-                      else:
-                          print(f"✗ Discord error for r/{subreddit}: {discord_response.status_code}")
-                          break
-                  
-                  if not meme_found:
-                      print(f"Could not find unique meme for r/{subreddit} after {max_attempts} attempts")
-                  
-                  # Small delay between posts to avoid rate limiting
+                  r = requests.get(f"https://meme-api.com/gimme/{subreddit}", timeout=10)
+                  if r.status_code != 200:
+                      continue
+
+                  data = r.json()
+                  link = data.get("postLink")
+                  if not link:
+                      continue
+
+                  post_id = link.split("/")[-2]
+                  if post_id in posted:
+                      continue
+
+                  payload = {
+                      "embeds": [{
+                          "title": data.get("title", "")[:256],
+                          "url": link,
+                          "image": {"url": data.get("url", "")},
+                          "footer": {"text": f"From r/{subreddit}"}
+                      }]
+                  }
+
+                  d = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
+                  if d.status_code in (200, 204):
+                      posted.add(post_id)
+
                   time.sleep(1)
-                  
-              except Exception as e:
-                  print(f"Error with r/{subreddit}: {str(e)}")
+
+              except:
                   continue
-          
-          # Save posted meme IDs (keep only last 1000 to prevent file from growing too large)
-          posted_memes_list = list(posted_memes)[-1000:]
-          with open(POSTED_MEMES_FILE, 'w') as f:
-              json.dump(posted_memes_list, f)
-          
-          print(f"\n=== SUMMARY: Posted {posted_count}/{len(subreddits)} memes ===")
-          print(f"Tracking {len(posted_memes_list)} posted memes")
-          
-          ENDOFPYTHON
+
+          with open(FILE, "w") as f:
+              json.dump(list(posted)[-1000:], f)
+
+          EOF
+
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add posted_memes.json
+          git commit -m "update meme history" || echo "no changes"
+          git push
